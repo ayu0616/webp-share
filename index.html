@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
-<title>画像をWebPに変換して共有</title>
+<title>画像を軽量化して共有</title>
 <style>
 *{box-sizing:border-box}
 body{font-family:system-ui,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif;background:#f1f5f9;color:#1e293b;margin:0;padding:0 0 calc(86px + env(safe-area-inset-bottom))}
@@ -43,8 +43,8 @@ footer{position:fixed;left:0;right:0;bottom:0;background:#fff;border-top:1px sol
 </head>
 <body>
 <div class="wrap">
-  <h1>画像をWebPに変換して共有</h1>
-  <p class="sub">カメラ・アルバムの画像をWebPに変換し、共有ボタンからDiscordなどへ添付します（最大10枚・並べ替え可）。</p>
+  <h1>画像を軽量化して共有</h1>
+  <p class="sub">カメラ・アルバムの画像を縮小・圧縮し、共有ボタンからDiscordなどへ添付します（最大10枚・並べ替え可）。</p>
 
   <div class="card">
     <div class="row">
@@ -63,6 +63,7 @@ footer{position:fixed;left:0;right:0;bottom:0;background:#fff;border-top:1px sol
         </select>
       </div>
     </div>
+    <p class="note" id="fmt"></p>
   </div>
 
   <div class="card">
@@ -86,13 +87,17 @@ footer{position:fixed;left:0;right:0;bottom:0;background:#fff;border-top:1px sol
 
 <script>
 const MAXN = 10, LIMIT = 20 * 1048576;
+// SafariはcanvasのWebP書き出しに未対応（要求しても黙ってPNGを返す）。1x1で判定してJPEGに落とす。
+const WEBP = (() => { const c = document.createElement('canvas'); c.width = c.height = 1; return c.toDataURL('image/webp').startsWith('data:image/webp'); })();
+const MIME = WEBP ? 'image/webp' : 'image/jpeg';
+const EXT = WEBP ? 'webp' : 'jpg';
 const $ = (s) => document.querySelector(s);
 const listEl = $('#list'), sumEl = $('#sum'), statusEl = $('#status'), emptyEl = $('#empty');
 const items = [];
 let busy = false, toastTimer;
 
 const fmt = (b) => b < 1048576 ? Math.round(b / 1024) + ' KB' : (b / 1048576).toFixed(2) + ' MB';
-const fname = (i) => 'photo-' + String(i + 1).padStart(2, '0') + '.webp';
+const fname = (i) => 'photo-' + String(i + 1).padStart(2, '0') + '.' + EXT;
 
 function toast(msg) {
   const t = $('#toast');
@@ -122,9 +127,11 @@ async function encode(file) {
     const h = Math.max(1, Math.round(img.naturalHeight * scale));
     const cv = document.createElement('canvas');
     cv.width = w; cv.height = h;
-    cv.getContext('2d').drawImage(img, 0, 0, w, h);
-    const blob = await new Promise((r) => cv.toBlob(r, 'image/webp', q));
-    if (!blob || blob.type !== 'image/webp') throw new Error('この端末はWebP書き出しに未対応です');
+    const ctx = cv.getContext('2d');
+    if (MIME === 'image/jpeg') { ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, w, h); }  // JPEGは透過を持てない
+    ctx.drawImage(img, 0, 0, w, h);
+    const blob = await new Promise((r) => cv.toBlob(r, MIME, q));
+    if (!blob) throw new Error('変換に失敗しました（メモリ不足の可能性）');
     return { blob, w, h };
   } finally {
     URL.revokeObjectURL(url);
@@ -231,6 +238,10 @@ for (const id of ['cam', 'gal']) {
 $('#quality').addEventListener('input', () => { $('#qOut').textContent = Math.round($('#quality').value * 100) + '%'; });
 $('#quality').addEventListener('change', reconvert);
 $('#maxEdge').addEventListener('change', reconvert);
+
+$('#fmt').textContent = WEBP
+  ? '出力形式: WebP'
+  : 'この端末はWebP書き出しに非対応（Safariの制約）のため、JPEGで出力します。';
 
 render();
 </script>
