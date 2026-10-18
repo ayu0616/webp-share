@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>画像をWebPに変換して共有</title>
+<style>
+*{box-sizing:border-box}
+body{font-family:system-ui,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif;background:#f1f5f9;color:#1e293b;margin:0;padding:0 0 calc(86px + env(safe-area-inset-bottom))}
+.wrap{max-width:640px;margin:0 auto;padding:14px}
+h1{font-size:18px;margin:6px 0 4px}
+.sub{font-size:12px;color:#64748b;margin:0 0 12px;line-height:1.6}
+.note{font-size:12px;color:#64748b;line-height:1.7}
+.card{background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:12px;margin-bottom:12px}
+label{font-size:12px;font-weight:700;color:#475569}
+.row{display:flex;gap:10px;flex-wrap:wrap;align-items:end}
+.field{display:flex;flex-direction:column;gap:6px;flex:1;min-width:150px}
+select{width:100%;padding:8px 10px;border:1px solid #cbd5e1;border-radius:8px;font-size:14px;background:#f8fafc}
+input[type=range]{width:100%}
+button{padding:10px 16px;border-radius:9px;border:1px solid #0369a1;background:#0284c7;color:#fff;font-weight:700;font-size:14px;cursor:pointer;font-family:inherit}
+button:disabled{opacity:.45}
+.picks{display:flex;gap:8px}
+.picks label{flex:1;display:flex;align-items:center;justify-content:center;padding:15px 8px;border-radius:10px;background:#0284c7;color:#fff;border:1px solid #0369a1;font-size:14px}
+.picks label.alt{background:#fff;color:#334155;border-color:#cbd5e1}
+ul{list-style:none;margin:0;padding:0}
+.item{display:flex;align-items:center;gap:10px;background:#fff;border:1px solid #e2e8f0;border-radius:12px;padding:8px;margin-bottom:8px}
+.idx{width:14px;flex:none;text-align:center;font-size:12px;font-weight:800;color:#94a3b8;font-variant-numeric:tabular-nums}
+.thumb{width:56px;height:56px;object-fit:cover;border-radius:8px;background:#f1f5f9;flex:none}
+.meta{flex:1;min-width:0}
+.nm{font-size:13px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dim{font-size:12px;color:#64748b;font-variant-numeric:tabular-nums}
+.dim b{color:#dc2626}
+.ops{display:flex;gap:4px;flex:none}
+.ops button,.ops a{width:38px;height:38px;padding:0;display:flex;align-items:center;justify-content:center;font-size:15px;line-height:1;background:#fff;color:#334155;border:1px solid #cbd5e1;border-radius:9px;text-decoration:none;cursor:pointer}
+.ops button.danger{color:#dc2626;border-color:#fecaca}
+footer{position:fixed;left:0;right:0;bottom:0;background:#fff;border-top:1px solid #e2e8f0;padding:10px 14px calc(10px + env(safe-area-inset-bottom))}
+.fbar{max-width:640px;margin:0 auto;display:flex;align-items:center;gap:12px}
+.total{flex:1;min-width:0;font-size:14px;font-weight:700;font-variant-numeric:tabular-nums}
+.total small{display:block;font-size:11px;color:#64748b;font-weight:400;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#toast{position:fixed;left:50%;bottom:calc(98px + env(safe-area-inset-bottom));transform:translate(-50%,8px);background:#1e293b;color:#fff;font-size:13px;line-height:1.5;padding:10px 16px;border-radius:12px;max-width:88vw;opacity:0;pointer-events:none;transition:.2s;z-index:9}
+#toast.on{opacity:1;transform:translate(-50%,0)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>画像をWebPに変換して共有</h1>
+  <p class="sub">カメラ・アルバムの画像をWebPに変換し、共有ボタンからDiscordなどへ添付します（最大10枚・並べ替え可）。</p>
+
+  <div class="card">
+    <div class="row">
+      <div class="field">
+        <label for="quality">画質 <span id="qOut">80%</span></label>
+        <input id="quality" type="range" min="0.5" max="0.95" step="0.05" value="0.8">
+      </div>
+      <div class="field">
+        <label for="maxEdge">最大辺</label>
+        <select id="maxEdge">
+          <option value="1280">1280px</option>
+          <option value="1600">1600px</option>
+          <option value="2048" selected>2048px</option>
+          <option value="2560">2560px</option>
+          <option value="0">原寸のまま</option>
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="picks">
+      <label>カメラで撮影<input id="cam" type="file" accept="image/*" capture="environment" hidden></label>
+      <label class="alt">アルバムから選択<input id="gal" type="file" accept="image/*" multiple hidden></label>
+    </div>
+  </div>
+
+  <p class="note" id="empty">まだ画像がありません。上のボタンから追加してください。</p>
+  <ul id="list"></ul>
+</div>
+
+<footer>
+  <div class="fbar">
+    <div class="total"><span id="sum">0枚</span><small id="status"></small></div>
+    <button id="share" disabled>共有</button>
+  </div>
+</footer>
+<div id="toast"></div>
+
+<script>
+const MAXN = 10, LIMIT = 20 * 1048576;
+const $ = (s) => document.querySelector(s);
+const listEl = $('#list'), sumEl = $('#sum'), statusEl = $('#status'), emptyEl = $('#empty');
+const items = [];
+let busy = false, toastTimer;
+
+const fmt = (b) => b < 1048576 ? Math.round(b / 1024) + ' KB' : (b / 1048576).toFixed(2) + ' MB';
+const fname = (i) => 'photo-' + String(i + 1).padStart(2, '0') + '.webp';
+
+function toast(msg) {
+  const t = $('#toast');
+  t.textContent = msg;
+  t.classList.add('on');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('on'), 4500);
+}
+
+function loadImage(file) {
+  return new Promise((res, rej) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => res({ img, url });
+    img.onerror = () => { URL.revokeObjectURL(url); rej(new Error('画像を開けません')); };
+    img.src = url;
+  });
+}
+
+async function encode(file) {
+  const { img, url } = await loadImage(file);  // EXIFの回転はブラウザが適用する
+  try {
+    const maxEdge = Number($('#maxEdge').value) || Infinity;
+    const q = Number($('#quality').value);
+    const scale = Math.min(1, maxEdge / Math.max(img.naturalWidth, img.naturalHeight));
+    const w = Math.max(1, Math.round(img.naturalWidth * scale));
+    const h = Math.max(1, Math.round(img.naturalHeight * scale));
+    const cv = document.createElement('canvas');
+    cv.width = w; cv.height = h;
+    cv.getContext('2d').drawImage(img, 0, 0, w, h);
+    const blob = await new Promise((r) => cv.toBlob(r, 'image/webp', q));
+    if (!blob || blob.type !== 'image/webp') throw new Error('この端末はWebP書き出しに未対応です');
+    return { blob, w, h };
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+function render() {
+  emptyEl.hidden = items.length > 0;
+  listEl.innerHTML = items.map((it, i) => `
+    <li class="item">
+      <span class="idx">${i + 1}</span>
+      <img class="thumb" src="${it.url}" alt="">
+      <div class="meta">
+        <div class="nm">${fname(i)}</div>
+        <div class="dim">${it.w}×${it.h} ・ ${fmt(it.blob.size)}${it.blob.size > LIMIT ? ' <b>20MB超</b>' : ''}</div>
+      </div>
+      <div class="ops">
+        <button data-i="${i}" data-a="up" ${i === 0 ? 'disabled' : ''}>↑</button>
+        <button data-i="${i}" data-a="down" ${i === items.length - 1 ? 'disabled' : ''}>↓</button>
+        <button data-i="${i}" data-a="dl">⤓</button>
+        <button data-i="${i}" data-a="rm" class="danger">✕</button>
+      </div>
+    </li>`).join('');
+  sumEl.textContent = items.length ? items.length + '枚 ・ 合計 ' + fmt(items.reduce((a, it) => a + it.blob.size, 0)) : '0枚';
+  if (!busy) statusEl.textContent = items.length ? '↑↓で並べ替え' : '画像を追加してください';
+  $('#share').disabled = busy || !items.length;
+}
+
+async function addFiles(files) {
+  if (busy) return;
+  const imgs = files.filter((f) => f.type.startsWith('image/'));
+  const room = MAXN - items.length;
+  if (room <= 0) return toast('画像は' + MAXN + '枚までです');
+  if (imgs.length > room) toast(MAXN + '枚までなので' + (imgs.length - room) + '枚は追加しませんでした');
+  busy = true; render();
+  const target = imgs.slice(0, room);
+  for (let i = 0; i < target.length; i++) {
+    statusEl.textContent = (i + 1) + '/' + target.length + ' 変換中…';
+    try {
+      const enc = await encode(target[i]);
+      items.push(Object.assign({ file: target[i], url: URL.createObjectURL(enc.blob) }, enc));
+    } catch (e) {
+      toast('「' + target[i].name + '」: ' + e.message);
+    }
+    render();
+  }
+  busy = false; render();
+}
+
+async function reconvert() {
+  if (busy || !items.length) return;
+  busy = true; render();
+  for (let i = 0; i < items.length; i++) {
+    statusEl.textContent = (i + 1) + '/' + items.length + ' 再変換中…';
+    try {
+      const enc = await encode(items[i].file);
+      URL.revokeObjectURL(items[i].url);
+      items[i] = Object.assign(items[i], enc, { url: URL.createObjectURL(enc.blob) });
+    } catch (e) {
+      toast(e.message);
+    }
+    render();
+  }
+  busy = false; render();
+}
+
+function save(i) {
+  const a = document.createElement('a');
+  a.href = items[i].url;
+  a.download = fname(i);
+  a.click();
+}
+
+listEl.addEventListener('click', (e) => {
+  const b = e.target.closest('button');
+  if (!b) return;
+  const i = Number(b.dataset.i), a = b.dataset.a;
+  if (a === 'rm') { URL.revokeObjectURL(items[i].url); items.splice(i, 1); }
+  else if (a === 'up' && i > 0) { [items[i - 1], items[i]] = [items[i], items[i - 1]]; }
+  else if (a === 'down' && i < items.length - 1) { [items[i + 1], items[i]] = [items[i], items[i + 1]]; }
+  else if (a === 'dl') return save(i);
+  render();
+});
+
+$('#share').addEventListener('click', () => {
+  // awaitを挟むとSafariでユーザー操作が切れるため、File生成は同期で行う
+  const files = items.map((it, i) => new File([it.blob], fname(i), { type: 'image/webp' }));
+  if (navigator.canShare && navigator.canShare({ files })) {
+    navigator.share({ files }).catch((e) => { if (e.name !== 'AbortError') toast('共有できませんでした: ' + e.message); });
+  } else {
+    toast('この端末は共有シートに画像を渡せません。⤓で保存してDiscordに添付してください');
+  }
+});
+
+for (const id of ['cam', 'gal']) {
+  const el = $('#' + id);
+  el.addEventListener('change', () => {
+    const picked = [...el.files];
+    el.value = '';
+    addFiles(picked);
+  });
+}
+
+$('#quality').addEventListener('input', () => { $('#qOut').textContent = Math.round($('#quality').value * 100) + '%'; });
+$('#quality').addEventListener('change', reconvert);
+$('#maxEdge').addEventListener('change', reconvert);
+
+render();
+</script>
+</body>
+</html>
